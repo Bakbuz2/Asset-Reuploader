@@ -18,6 +18,8 @@ import (
 const (
 	createAssetURL   = "https://apis.roblox.com/assets/v1/assets"
 	operationBaseURL = "https://apis.roblox.com/assets/v1/operations/"
+	maxPollAttempts  = 30
+	pollInterval     = time.Second
 )
 
 type createAssetRequest struct {
@@ -240,8 +242,8 @@ func executeCreateAsset(
 			return 0, errors.New("create asset operation id is empty")
 		}
 
-		for range 30 {
-			time.Sleep(time.Second)
+		for range maxPollAttempts {
+			time.Sleep(pollInterval)
 			polled, err := pollOperation(c, operationID)
 			if err != nil {
 				if err.Error() == onTokenInvalid.Error() {
