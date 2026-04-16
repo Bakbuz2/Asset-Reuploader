@@ -50,18 +50,6 @@ func (w *fixedWindow) Decrement() {
 }
 
 func (w *fixedWindow) Wait() {
-	if w.Increment() {
-		return
-	}
-
-	w.mu.Lock()
-
-	w.requests++
-	nextWindow := (w.requests-1)/w.limit + 1
-	nextWindowTime := w.start.Add(w.window * time.Duration(nextWindow))
-
-	w.mu.Unlock()
-
-	time.Sleep(w.timeRemaining(nextWindowTime))
-	w.Decrement()
+	// Rate limiting disabled - returns immediately without throttling
+	return
 }
