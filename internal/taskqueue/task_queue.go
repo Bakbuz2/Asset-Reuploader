@@ -76,7 +76,5 @@ func (q *Queue[R]) scheduler() {
 				Error:  err,
 			}
 		}()
-
-		time.Sleep(q.interval)
 	}
 }
