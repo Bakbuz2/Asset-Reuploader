@@ -27,19 +27,8 @@ import (
 
 const assetTypeID int32 = 24
 const animationUploadRetryTries = 3
-const animationUploadRateLimitMaxPower = 6
 
 var ErrUnauthorized = errors.New("authentication required to access asset")
-
-func animationRateLimitBackoff(try int) time.Duration {
-	if try < 1 {
-		try = 1
-	}
-	if try > animationUploadRateLimitMaxPower {
-		try = animationUploadRateLimitMaxPower
-	}
-	return time.Second * time.Duration(1<<(try-1))
-}
 
 func MoveValueToTop[T comparable](arr *atomicarray.AtomicArray[T], value T) {
 	arr.Update(func(currentArray []T) []T {
@@ -90,9 +79,9 @@ func Reupload(ctx *context.Context, r *request.Request) {
 	creatorPlaceMap := shardedmap.New[*atomicarray.AtomicArray[int64]]()
 	creatorMutexMap := shardedmap.New[*sync.RWMutex]()
 
-	uploadQueue := taskqueue.New[int64](time.Minute, 3000)                  // wouldnt it be smarter to build in the queue with the api library... YES... but we dont do fixes aroudn here we just add on to the slow degredation of the code base
-	groupGameQueue := taskqueue.New[*games.GamesResponse](time.Second*5, 5) // there doesnt seem to be a limit in minutes on this api endpoint... and its not public and i dont feel like testing the limits sooo hopefully this works
-	userGameQueue := taskqueue.New[*games.GamesResponse](time.Second*5, 5)  // I dont even think there is a limit on this like group games but we can be safe... yes i like to spam elipses
+	uploadQueue := taskqueue.New[int64](time.Minute, 3000)
+	groupGameQueue := taskqueue.New[*games.GamesResponse](time.Second*5, 5)
+	userGameQueue := taskqueue.New[*games.GamesResponse](time.Second*5, 5)
 
 	logger.Println("Reuploading animations...")
 
@@ -144,14 +133,10 @@ func Reupload(ctx *context.Context, r *request.Request) {
 					case ide.UploadAnimationErrors.ErrInappropriateName:
 						assetInfo.Name = fmt.Sprintf("(%s) [Censored]", assetInfo.Name)
 					default:
-						if errors.Is(err, ide.ErrRateLimited) && try < animationUploadRetryTries {
-							time.Sleep(animationRateLimitBackoff(try))
-						}
-
 						switch err.(type) {
-						case *net.OpError, *net.DNSError:
-							uploadQueue.Limiter.Decrement()
-						}
+					case *net.OpError, *net.DNSError:
+						uploadQueue.Limiter.Decrement()
+					}
 					}
 
 					return 0, &retry.ContinueRetry{Err: err}
@@ -218,14 +203,14 @@ func Reupload(ctx *context.Context, r *request.Request) {
 			return nil, err
 		}
 
-		ids := make([]int64, 0, len(defaultPlaceIDs)) // we only do len defaultPlaceIds because there may be overlapping, i guess allocating more memory would be fine... idk guys im getting lazy just wait for revamp
-		for _, placeInfo := range resp.Data {         // yes we copying many bytes per iteration, yes i dont care, yes this is another stupid message, yes code iwll get better on revamp :sob:
+		ids := make([]int64, 0, len(defaultPlaceIDs))
+		for _, placeInfo := range resp.Data {
 			rootPlaceID := placeInfo.RootPlace.ID
 
 			if _, exists := defaultPlaceIDsMap[rootPlaceID]; exists {
 				continue
 			}
-			ids = append(ids, rootPlaceID) // we no longer only need 1 valid place id :// ( ͡° ͜ʖ ͡°) yall remember this peak face lmk
+			ids = append(ids, rootPlaceID)
 		}
 		ids = append(ids, defaultPlaceIDs...)
 
@@ -320,7 +305,7 @@ func Reupload(ctx *context.Context, r *request.Request) {
 				continue
 			}
 			assetID := body[index].AssetID
-			index++
+			index++ 
 
 			assetInfo := assetInfoMap[assetID]
 			newUploadError("Failed to get asset location", assetInfo, assetLocation.Errors[0].Message)
