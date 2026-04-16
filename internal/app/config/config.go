@@ -2,6 +2,8 @@ package config
 
 import (
 	"bufio"
+	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/kartFr/Asset-Reuploader/internal/files"
@@ -18,11 +20,11 @@ var (
 
 func init() {
 	contents, err := files.Read("config.ini")
-	if err != nil {
+	if err == nil {
 		scanner := bufio.NewScanner(strings.NewReader(contents))
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
-			split := strings.Split(line, "=")
+			split := strings.SplitN(line, "=", 2)
 			if len(split) != 2 {
 				continue
 			}
@@ -41,4 +43,25 @@ func init() {
 
 func Get(key string) string {
 	return config[key]
+}
+
+func Set(key string, value string) {
+	config[key] = value
+}
+
+func Save() error {
+	var out strings.Builder
+	keys := make([]string, 0, len(config))
+	for key := range config {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for i, key := range keys {
+		_, _ = fmt.Fprintf(&out, "%s=%s", key, config[key])
+		if i != len(keys)-1 {
+			out.WriteByte('\n')
+		}
+	}
+	return files.Write("config.ini", out.String())
 }

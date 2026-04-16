@@ -23,6 +23,8 @@ const (
 	pollInterval     = time.Second
 )
 
+var errTokenInvalid = errors.New("XSRF token validation failed")
+
 func setAPIKeyHeader(req *http.Request) {
 	apiKey := strings.TrimSpace(config.Get("api_key"))
 	if apiKey != "" {
@@ -93,38 +95,50 @@ func newCreateAssetRequest(
 		return nil, err
 	}
 
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
+	pr, pw := io.Pipe()
+	writer := multipart.NewWriter(pw)
+	formDataContentType := writer.FormDataContentType()
 
-	field, err := writer.CreateFormField("request")
+	go func() {
+		defer pw.Close()
+
+		field, err := writer.CreateFormField("request")
+		if err != nil {
+			_ = pw.CloseWithError(err)
+			return
+		}
+		if _, err := field.Write(requestJSON); err != nil {
+			_ = pw.CloseWithError(err)
+			return
+		}
+
+		fileHeader := make(textproto.MIMEHeader)
+		fileHeader.Set("Content-Disposition", `form-data; name="fileContent"; filename="asset"`)
+		fileHeader.Set("Content-Type", contentType)
+
+		filePart, err := writer.CreatePart(fileHeader)
+		if err != nil {
+			_ = pw.CloseWithError(err)
+			return
+		}
+		if _, err := io.Copy(filePart, bytes.NewReader(data.Bytes())); err != nil {
+			_ = pw.CloseWithError(err)
+			return
+		}
+		if err := writer.Close(); err != nil {
+			_ = pw.CloseWithError(err)
+			return
+		}
+	}()
+
+	req, err := http.NewRequest("POST", createAssetURL, pr)
 	if err != nil {
-		return nil, err
-	}
-	if _, err := field.Write(requestJSON); err != nil {
-		return nil, err
-	}
-
-	fileHeader := make(textproto.MIMEHeader)
-	fileHeader.Set("Content-Disposition", `form-data; name="fileContent"; filename="asset"`)
-	fileHeader.Set("Content-Type", contentType)
-
-	filePart, err := writer.CreatePart(fileHeader)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := io.Copy(filePart, bytes.NewReader(data.Bytes())); err != nil {
-		return nil, err
-	}
-	if err := writer.Close(); err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest("POST", createAssetURL, bytes.NewReader(body.Bytes()))
-	if err != nil {
+		_ = pr.Close()
+		_ = pw.Close()
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "RobloxStudio/WinInet")
-	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Content-Type", formDataContentType)
 	return req, nil
 }
 
@@ -204,7 +218,7 @@ func pollOperation(c *roblox.Client, operationID string) (*operationResponse, er
 		return &operation, nil
 	case http.StatusForbidden:
 		c.SetToken(resp.Header.Get("x-csrf-token"))
-		return nil, errors.New("XSRF token validation failed")
+		return nil, errTokenInvalid
 	default:
 		return nil, errors.New(decodeStatus(body, resp.Status))
 	}
@@ -252,11 +266,11 @@ func executeCreateAsset(
 			return 0, errors.New("create asset operation id is empty")
 		}
 
-		for range maxPollAttempts {
+		for i := 0; i < maxPollAttempts; i++ {
 			time.Sleep(pollInterval)
 			polled, err := pollOperation(c, operationID)
 			if err != nil {
-				if err.Error() == onTokenInvalid.Error() {
+				if errors.Is(err, errTokenInvalid) {
 					return 0, onTokenInvalid
 				}
 				return 0, err
