@@ -27,10 +27,17 @@ import (
 
 const assetTypeID int32 = 24
 const animationUploadRetryTries = 3
+const animationUploadRateLimitMaxPower = 6
 
 var ErrUnauthorized = errors.New("authentication required to access asset")
 
 func animationRateLimitBackoff(try int) time.Duration {
+	if try < 1 {
+		try = 1
+	}
+	if try > animationUploadRateLimitMaxPower {
+		try = animationUploadRateLimitMaxPower
+	}
 	return time.Second * time.Duration(1<<(try-1))
 }
 
