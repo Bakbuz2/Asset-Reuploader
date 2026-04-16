@@ -26,6 +26,7 @@ import (
 )
 
 const assetTypeID int32 = 24
+const animationUploadRetryTries = 3
 
 var ErrUnauthorized = errors.New("authentication required to access asset")
 
@@ -114,7 +115,7 @@ func Reupload(ctx *context.Context, r *request.Request) {
 
 		res := <-uploadQueue.QueueTask(func() (int64, error) {
 			return retry.Do(
-				retry.NewOptions(retry.Tries(3)),
+				retry.NewOptions(retry.Tries(animationUploadRetryTries)),
 				func(try int) (int64, error) {
 					pauseController.WaitIfPaused()
 					if try > 1 {
@@ -132,6 +133,10 @@ func Reupload(ctx *context.Context, r *request.Request) {
 					case ide.UploadAnimationErrors.ErrInappropriateName:
 						assetInfo.Name = fmt.Sprintf("(%s) [Censored]", assetInfo.Name)
 					default:
+						if errors.Is(err, ide.ErrRateLimited) && try < animationUploadRetryTries {
+							time.Sleep(time.Second * time.Duration(1<<(try-1)))
+						}
+
 						switch err.(type) {
 						case *net.OpError, *net.DNSError:
 							uploadQueue.Limiter.Decrement()

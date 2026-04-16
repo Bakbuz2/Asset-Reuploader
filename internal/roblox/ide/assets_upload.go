@@ -24,6 +24,7 @@ const (
 )
 
 var errTokenInvalid = errors.New("XSRF token validation failed")
+var ErrRateLimited = errors.New("rate limited")
 
 func setAPIKeyHeader(req *http.Request) {
 	apiKey := strings.TrimSpace(config.Get("api_key"))
@@ -285,6 +286,8 @@ func executeCreateAsset(
 		return 0, errors.New("asset operation timed out")
 	case http.StatusUnauthorized:
 		return 0, onNotLoggedIn
+	case http.StatusTooManyRequests:
+		return 0, ErrRateLimited
 	case http.StatusForbidden:
 		c.SetToken(resp.Header.Get("x-csrf-token"))
 		return 0, onTokenInvalid
